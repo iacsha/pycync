@@ -51,8 +51,18 @@ class CommandClient:
             case MessageType.PIPE.value:
                 if parsed_message.command_code == PipeCommandCode.QUERY_DEVICE_STATUS_PAGES.value:
                     updated_devices: dict[str, CyncDevice] = parsed_message.data
+                    if not updated_devices:
+                        # A reply that lists no devices (an empty page, or another payload sharing this
+                        # command code) says nothing about which devices are online. Marking every device
+                        # offline here made Home Assistant show them unavailable after each poll until the
+                        # next reply arrived.
+                        return
+                    # A reply covers the home of the hub that answered. Devices in other homes are not in it,
+                    # so only this reply's homes may have devices marked offline.
+                    replied_home_ids = {device.parent_home_id for device in updated_devices.values()}
                     for device in device_storage.get_flattened_devices(self._user.user_id):
-                        device.is_online = device.unique_id in updated_devices
+                        if device.parent_home_id in replied_home_ids:
+                            device.is_online = device.unique_id in updated_devices
                     await self._send_update_to_listener(parsed_message.data)
 
     async def probe_devices(self):
